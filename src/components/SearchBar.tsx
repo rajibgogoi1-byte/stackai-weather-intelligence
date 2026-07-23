@@ -1,9 +1,13 @@
-import React, { useState } from 'react';
-import { Search, MapPin, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, MapPin, Loader2, Globe } from 'lucide-react';
+import { CityGeocodingResult } from '../types';
 
 interface SearchBarProps {
   onSearch: (city: string) => void;
   isLoading: boolean;
+  matchingCities?: CityGeocodingResult[];
+  selectedCityId?: number | null;
+  onSelectCity?: (city: CityGeocodingResult) => void;
 }
 
 const POPULAR_CITIES = [
@@ -15,7 +19,13 @@ const POPULAR_CITIES = [
   'Mumbai'
 ];
 
-export default function SearchBar({ onSearch, isLoading }: SearchBarProps) {
+export default function SearchBar({ 
+  onSearch, 
+  isLoading,
+  matchingCities = [],
+  selectedCityId = null,
+  onSelectCity
+}: SearchBarProps) {
   const [query, setQuery] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -28,6 +38,15 @@ export default function SearchBar({ onSearch, isLoading }: SearchBarProps) {
   const handlePopularCityClick = (city: string) => {
     setQuery(city);
     onSearch(city);
+  };
+
+  const handleDropdownSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const selectedId = Number(e.target.value);
+    const selected = matchingCities.find(c => c.id === selectedId);
+    if (selected && onSelectCity) {
+      setQuery(selected.name);
+      onSelectCity(selected);
+    }
   };
 
   return (
@@ -67,6 +86,41 @@ export default function SearchBar({ onSearch, isLoading }: SearchBarProps) {
           </button>
         </div>
       </form>
+
+      {/* Matching Cities Dropdown (shown when multiple results exist) */}
+      {matchingCities.length > 1 && (
+        <div 
+          className="p-3.5 bg-blue-50/50 border border-blue-100 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all"
+          id="search-matching-cities-wrapper"
+        >
+          <div className="flex items-center gap-2 text-slate-700 text-xs font-semibold">
+            <Globe size={16} className="text-blue-600 flex-shrink-0" />
+            <span>Multiple cities found ({matchingCities.length}):</span>
+          </div>
+
+          <div className="relative min-w-[240px] sm:max-w-xs w-full">
+            <select
+              id="city-matches-select"
+              value={selectedCityId || ''}
+              disabled={isLoading}
+              onChange={handleDropdownSelect}
+              className="w-full bg-white text-slate-800 border border-slate-200 hover:border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {matchingCities.map((cityObj) => {
+                const populationStr = cityObj.population 
+                  ? ` • Pop: ${(cityObj.population / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })}k`
+                  : '';
+                const stateStr = cityObj.admin1 ? `, ${cityObj.admin1}` : '';
+                return (
+                  <option key={cityObj.id} value={cityObj.id}>
+                    {cityObj.name}{stateStr}, {cityObj.country}{populationStr}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* Popular City Shortcuts */}
       <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start" id="popular-cities-section">

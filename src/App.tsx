@@ -92,21 +92,40 @@ export default function App() {
   const handleSearchCity = async (cityName: string) => {
     if (!cityName.trim()) return;
     
+    const trimmedInput = cityName.trim();
+
+    // 1. Check if trimmedInput directly matches a city already present in matchingCities
+    const existingMatch = matchingCities.find(c => {
+      const fullDisplay = `${c.name}${c.admin1 ? ', ' + c.admin1 : ''}, ${c.country}`.toLowerCase();
+      const simpleDisplay = `${c.name}, ${c.country}`.toLowerCase();
+      const inputLower = trimmedInput.toLowerCase();
+      return fullDisplay === inputLower || simpleDisplay === inputLower || c.name.toLowerCase() === inputLower;
+    });
+
+    if (existingMatch) {
+      await handleFetchWeatherForLocation(existingMatch);
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setMatchingCities([]);
     setSelectedCityId(null);
     
     try {
-      // Normalize query (e.g. searching for Bangalore redirects search to Bengaluru to get Bengaluru, Karnataka, India by default)
-      let searchName = cityName.trim();
+      // 2. Extract base city name and qualifiers if input contains commas (e.g. "London, England, United Kingdom")
+      const parts = trimmedInput.split(',').map(s => s.trim()).filter(Boolean);
+      let searchName = parts[0] || trimmedInput;
+      const qualifiers = parts.slice(1).map(s => s.toLowerCase());
+
+      // Normalize query (e.g. searching for Bangalore redirects search to Bengaluru)
       if (/^bangalore$/i.test(searchName)) {
         searchName = 'Bengaluru';
       } else if (/bangalore/i.test(searchName)) {
         searchName = searchName.replace(/bangalore/i, 'Bengaluru');
       }
 
-      // 1. Fetch Geocoding information (retrieving up to 10 matching locations to support dropdown selection)
+      // 3. Fetch Geocoding information
       const geocodingUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(
         searchName
       )}&count=10&language=en&format=json`;
@@ -124,11 +143,24 @@ export default function App() {
         return;
       }
 
-      // 2. Sort results: Prefer Bengaluru, Karnataka, India if searched for Bangalore/Bengaluru,
-      // then sort by population descending (prefer major metropolitan centers), then exact query matches
+      // 4. Sort results: Boost qualifier matches, Bangalore preference, population descending, exact name match
       const sortedResults = [...geoData.results];
       
       sortedResults.sort((a, b) => {
+        if (qualifiers.length > 0) {
+          const matchA = qualifiers.some(q => 
+            a.country?.toLowerCase().includes(q) || 
+            a.admin1?.toLowerCase().includes(q) ||
+            a.name?.toLowerCase().includes(q)
+          ) ? 1 : 0;
+          const matchB = qualifiers.some(q => 
+            b.country?.toLowerCase().includes(q) || 
+            b.admin1?.toLowerCase().includes(q) ||
+            b.name?.toLowerCase().includes(q)
+          ) ? 1 : 0;
+          if (matchB !== matchA) return matchB - matchA;
+        }
+
         const isBangQuery = /bangalore|bengaluru/i.test(cityName);
         if (isBangQuery) {
           const isA = (a.name?.toLowerCase() === 'bengaluru' || a.name?.toLowerCase() === 'bangalore') && a.country?.toLowerCase() === 'india';
@@ -152,7 +184,7 @@ export default function App() {
 
       setMatchingCities(sortedResults);
       
-      // Auto-load weather parameters for the top sorted match
+      // Auto-load weather parameters for the top sorted match directly using lat/lon
       await handleFetchWeatherForLocation(sortedResults[0]);
       
     } catch (err: any) {
@@ -205,53 +237,13 @@ export default function App() {
               <h2 className="text-base font-extrabold text-slate-800">Analyze Weather Insights</h2>
               <p className="text-xs text-slate-500">Search for any global city to fetch real-time forecasts and smart alerts.</p>
             </div>
-            <SearchBar onSearch={handleSearchCity} isLoading={isLoading} />
-
-            {/* Dropdown for multiple matching cities */}
-            {matchingCities.length > 1 && (
-              <div 
-                className="p-4 bg-blue-50/40 border border-blue-100/70 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in" 
-                id="city-selector-dropdown-wrapper"
-              >
-                <div className="space-y-0.5 text-left">
-                  <div className="flex items-center gap-1.5 text-blue-900 font-extrabold text-xs">
-                    <span className="w-2 h-2 rounded-full bg-blue-600 animate-ping inline-block" />
-                    Multiple Locations Found ({matchingCities.length})
-                  </div>
-                  <p className="text-[11px] text-slate-500 font-medium">
-                    Not the city you were looking for? Choose another match:
-                  </p>
-                </div>
-                
-                <div className="relative min-w-[240px] sm:max-w-xs w-full" id="city-selector-inner">
-                  <select
-                    id="city-matches-select"
-                    value={selectedCityId || ''}
-                    disabled={isLoading}
-                    onChange={(e) => {
-                      const selectedId = Number(e.target.value);
-                      const selected = matchingCities.find(c => c.id === selectedId);
-                      if (selected) {
-                        handleFetchWeatherForLocation(selected);
-                      }
-                    }}
-                    className="w-full bg-white text-slate-800 border border-slate-200 hover:border-slate-300 rounded-xl px-3 py-2 text-xs font-semibold shadow-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {matchingCities.map((cityObj) => {
-                      const populationStr = cityObj.population 
-                        ? ` • Pop: ${(cityObj.population / 1000).toLocaleString(undefined, { maximumFractionDigits: 0 })}k`
-                        : '';
-                      const stateStr = cityObj.admin1 ? `, ${cityObj.admin1}` : '';
-                      return (
-                        <option key={cityObj.id} value={cityObj.id}>
-                          {cityObj.name}{stateStr}, {cityObj.country}{populationStr}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
-              </div>
-            )}
+            <SearchBar 
+              onSearch={handleSearchCity} 
+              isLoading={isLoading} 
+              matchingCities={matchingCities}
+              selectedCityId={selectedCityId}
+              onSelectCity={handleFetchWeatherForLocation}
+            />
           </div>
         </section>
 
